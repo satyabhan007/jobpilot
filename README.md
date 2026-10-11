@@ -242,28 +242,59 @@ title", "Requires 4+ yrs — you have 4", …). Tune weights in `js/matcher.js` 
 
 ### Optional: AI re-ranking
 
-Fill the **AI section** in the sidebar with any OpenAI-compatible endpoint:
+Fill the **AI section** in Setup with any OpenAI-compatible endpoint (Groq, OpenRouter,
+NVIDIA, DeepSeek, custom — each keeps its own key). Then **✨ Re-rank top matches** sends
+the top 30 matches + your profile to the model and blends an AI score/reason into each card.
+The API key is stored only in your browser and is sent only to the endpoint you chose.
 
-- DeepSeek: base `https://api.deepseek.com/v1`, model `deepseek-chat`
-- OpenAI: base `https://api.openai.com/v1`, model `gpt-4o-mini`
-- Local Ollama: base `http://localhost:11434/v1`, model e.g. `llama3.1`
+---
 
-Then **✨ Re-rank top matches** sends the top 30 matches + your profile to the model and
-blends an AI score/reason into each card. The API key is stored only in your browser and is
-sent only to the endpoint you chose.
+## 🧠 Laya — the decision engine
+
+The **Laya tab** is where shortlisted jobs become decisions. Every job gets three live
+metrics plus a composite — recomputed **in realtime** on every filter/profile change, no
+network needed:
+
+| Metric | What it measures |
+|---|---|
+| **Match** | Your local matcher score (blended 65/35 with the AI re-rank score when you have run it) |
+| **Value** | Pay vs regional benchmark (parses `$120k-$180k`, `₹25-40 LPA`, `lakhs`…), seniority fit, company signals, perks |
+| **Odds** | Skill coverage, experience bar, role fit, location, posting freshness, inbound intent (a recruiter who *emailed you* scores highest) |
+| **Priority** | `0.42·match + 0.24·value + 0.34·odds` → 🚀 **Apply now** (≥78) · 🟡 **Prepare & apply** (≥62) · 👀 **Worth watching** (≥45) · 💤 **Low priority** |
+
+The board ranks everything by priority, shows live stats (apply-now count, average
+readiness, best odds, top value) and a one-line **why** for every ranking. Sort by
+priority / value / odds / match / freshest.
+
+### The job dossier
+
+Open 🧠 on any card (or *Full dossier →* in Laya) for the full read:
+
+- **Score plates** — priority, match, value, odds, readiness + 8 metric bars (skills, role,
+  experience, location, freshness, level, pay, inbound intent)
+- **"What this job really means"** — a plain-language translation of the posting (local
+  always; Laya AI upgrades it to a full narrative read)
+- **Profile readiness** — ✓ what you bring / ⚠ gaps & risks, plus a ✓/• checklist of *their*
+  requirements against your profile
+- **Laya AI** (needs an AI key) — verdict, interview-odds estimate, and a **ready-to-send
+  cover note** built from your profile; **✨ Run Laya AI — top 10** batches it. Verdicts are
+  cached in localStorage and invalidated automatically when your profile changes
+- **English / हिन्दी** — switch the dossier language; Laya AI rewrites the translation,
+  verdict, strengths, gaps and cover note in Devanagari
 
 ---
 
 ## Features
 
-- 🎯 **Matches / Saved tabs**, live filter bar (keyword, min score, source, remote-only, sort)
+- 🧠 **Laya decision engine** — value × odds × match → priority ranking, realtime metric bars, full per-job dossiers (translation, readiness, gaps, AI cover note, EN/हिन्दी)
+- 🎯 **Matches / Laya / Saved tabs**, live filter bar (keyword, min score, source, remote-only, sort)
 - 📊 **Live dashboard stats** — jobs found, strong matches (≥70), saved, sources live
 - ⭕ **Score rings** on every card, color-coded (green ≥70, amber ≥40) + company avatars
 - 🌗 **Dark / light theme** toggle, remembered across sessions
-- 📱 **Mobile-first UX** — settings slide in as a drawer, bottom nav bar (Matches / Saved / Setup), 44px+ touch targets
+- 📱 **Mobile-first UX** — settings slide in as a drawer, bottom nav bar (Matches / Laya / Saved / Setup), 44px+ touch targets
 - ⏳ **Skeleton loading** while scanning, staggered card animations, animated toasts
 - 📄 **"Show more" pagination** (60 cards at a time) so huge scans stay fast
-- ⌨️ Keyboard shortcuts: `/` focuses search · `Esc` clears it or closes the drawer
+- ⌨️ Keyboard shortcuts: `/` focuses search · `Esc` clears it, closes the drawer or the dossier
 - 🙈 Collapsible sidebar sections; 💾 save / ✕ dismiss with instant feedback
 - ⚡ **Scan everything** — boards + Gmail in one click; per-source status + scan log
 - ♻️ **Cached results** — last scan is restored on reload so the app opens with data
@@ -283,8 +314,9 @@ js/jobs.js          job-board fetchers (add yours here)
 js/gmail.js         Google OAuth + inbox scanner
 js/githubauth.js    GitHub identity gate — Device Flow + PAT verify + lock screen
 js/matcher.js       local scoring engine (tune weights here)
-js/llm.js           optional AI re-ranking (prompt includes portfolio context)
-js/app.js           UI controller (stats, drawer, pagination, job cards, theme)
+js/laya.js          Laya decision engine — value, odds, readiness, salary/level parsing, AI prompt
+js/llm.js           AI router (re-ranking + Laya dossiers) — any OpenAI-compatible endpoint
+js/app.js           UI controller (stats, drawer, pagination, job cards, theme, dossier)
 js/demo.js          sample data themed to your profile
 scripts/build-dist.sh          build the GitHub-Pages-ready dist/ folder
 .github/workflows/  auto-deploy to GitHub Pages on push

@@ -6,6 +6,7 @@ const Store = {
     SAVED: 'jobpilot.savedJobs',
     DISMISSED: 'jobpilot.dismissed',
     CACHE: 'jobpilot.cache',            // {sourceId: {ts, jobs:[]}}
+    LAYA: 'jobpilot.layaVerdicts',      // {dedupeKey: {fp, lang, ts, ...ai verdict}}
     GMAIL: 'jobpilot.gmailMeta',        // legacy single-account {email}
     GMAIL_ACCOUNTS: 'jobpilot.gmailAccounts',  // multi-account: [email, ...]
     THEME: 'jobpilot.theme',            // 'dark' | 'light'
@@ -114,6 +115,18 @@ const Store = {
     const d = Store.dismissed();
     if (!d.includes(id)) { d.push(id); Store.set(Store.K.DISMISSED, d); }
   },
+
+  /* ---- Laya AI verdicts (cached per job, invalidated by profile fingerprint) ---- */
+  layaVerdicts() { return Store.get(Store.K.LAYA, {}); },
+  saveLayaVerdict(key, verdict) {
+    const all = Store.layaVerdicts();
+    all[key] = verdict;
+    // prune to the newest 120 so localStorage never bloats
+    const entries = Object.entries(all).sort((a, b) => ((b[1] && b[1].ts) || 0) - ((a[1] && a[1].ts) || 0));
+    Store.set(Store.K.LAYA, Object.fromEntries(entries.slice(0, 120)));
+  },
+  layaVerdict(key) { return Store.layaVerdicts()[key] || null; },
+  clearLayaVerdicts() { try { localStorage.removeItem(Store.K.LAYA); } catch (e) {} },
 
   /* ---- per-source cache of last successful fetch ---- */
   cacheGet(sourceId) { return Store.get(Store.K.CACHE, {})[sourceId] || null; },

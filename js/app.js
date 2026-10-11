@@ -10,7 +10,10 @@ const App = {
     renderLimit: 60,     // pagination window into filteredMatches()
     scanning: false,
     demo: false,
-    sourceStatus: {}     // {id: {ok, ts, count, error}}
+    sourceStatus: {},    // {id: {ok, ts, count, error}}
+    layaSort: 'priority',// decision-board ranking
+    layaLang: 'en',      // dossier language for Laya AI ('en' | 'hi')
+    dossier: null        // match currently open in the dossier modal
   },
 
   /* ================= init ================= */
@@ -367,7 +370,19 @@ const App = {
 
     // bottom nav tabs
     el('bn-matches').addEventListener('click', () => { App.openDrawer(false); App.setTab('matches'); });
+    el('bn-laya').addEventListener('click', () => { App.openDrawer(false); App.setTab('laya'); });
     el('bn-saved').addEventListener('click', () => { App.openDrawer(false); App.setTab('saved'); });
+
+    // Laya decision board
+    el('laya-sort').addEventListener('change', () => {
+      App.state.layaSort = el('laya-sort').value;
+      App.renderLaya();
+    });
+    el('btn-laya-ai').addEventListener('click', () => App.runLayaAI());
+    el('dossier-close').addEventListener('click', () => App.closeDossier());
+    el('job-dossier').addEventListener('click', (ev) => {
+      if (ev.target.id === 'job-dossier') App.closeDossier();
+    });
 
     // collapsible sidebar cards (head click or Enter/Space)
     document.querySelectorAll('.collapsible').forEach(cardEl => {
@@ -398,6 +413,7 @@ const App = {
         el('f-text').focus();
         el('f-text').select();
       } else if (e.key === 'Escape') {
+        if (!el('job-dossier').classList.contains('hidden')) { App.closeDossier(); return; }
         if (el('sidebar').classList.contains('open')) App.openDrawer(false);
         else if (document.activeElement === el('f-text')) {
           el('f-text').value = '';
@@ -424,9 +440,26 @@ const App = {
   setTab(name) {
     App.state.activeTab = name;
     document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x.dataset.tab === name));
-    document.getElementById('bn-matches').classList.toggle('active', name === 'matches');
-    document.getElementById('bn-saved').classList.toggle('active', name === 'saved');
+    ['bn-matches', 'bn-laya', 'bn-saved'].forEach(id => {
+      const b = document.getElementById(id);
+      if (b) b.classList.toggle('active', id === 'bn-' + name);
+    });
     App.renderAll();
+  },
+
+  /** Show/hide the three content views + their chrome (called from renderAll). */
+  applyView() {
+    const t = App.state.activeTab;
+    el('matches').classList.toggle('hidden', t !== 'matches');
+    el('laya').classList.toggle('hidden', t !== 'laya');
+    el('saved').classList.toggle('hidden', t !== 'saved');
+    el('filter-bar').classList.toggle('hidden', t === 'laya');
+    el('stats-bar').classList.toggle('hidden', t === 'laya');
+    const hasData = App.state.matches.length > 0;
+    el('empty-state').classList.toggle('hidden', t !== 'matches' || hasData || App.state.scanning);
+    el('skeletons').classList.toggle('hidden', !(t === 'matches' && !hasData && App.state.scanning));
+    el('btn-show-more').classList.toggle('hidden', t !== 'matches' ||
+      App.filteredMatches().length <= App.state.renderLimit);
   },
 
   /* ================= scanning ================= */
@@ -851,7 +884,7 @@ const App = {
   /* ================= AI ================= */
   async aiRerank() {
     const s = App.saveSettingsFromForm();
-    if (!s.aiKey) { App.toast('Add an API key first (sidebar, AI section)', true); return; }
+    if (!LLM.hasKey(s)) { App.toast('Add an API key first (Setup → AI re-ranking)', true); return; }
     const top = App.state.matches
       .filter(m => m.score > 0)
       .sort((a, b) => b.score - a.score)
@@ -885,6 +918,8 @@ const App = {
   renderAll() {
     App.renderMatches();
     App.renderSaved();
+    App.renderLaya();
+    App.applyView();
   },
 
   filteredMatches() {
@@ -1020,11 +1055,13 @@ const App = {
       (skills ? '<div class="meta-row">' + skills + '</div>' : '') +
       (reasons || aiReason ? '<ul class="reasons">' + reasons + moreR + aiReason + '</ul>' : '') +
       '<div class="job-actions">' + applyBtn + '<span class="spacer"></span>' +
+        '<button class="icon-btn" data-act="laya" title="Open the Laya dossier (value, odds, readiness)" aria-label="Open the Laya dossier for this job">🧠</button>' +
         '<button class="icon-btn' + (isSaved ? ' saved' : '') + '" data-act="save" aria-label="' + (isSaved ? 'Remove from saved' : 'Save this job') + '">' +
           (isSaved ? '💾 saved' : '💾 save') + '</button>' +
         (inSaved ? '' : '<button class="icon-btn dismiss" data-act="dismiss" title="Hide this job" aria-label="Hide this job">✕</button>') +
       '</div>';
 
+    card.querySelector('[data-act="laya"]').addEventListener('click', () => App.openDossier(m));
     card.querySelector('[data-act="save"]').addEventListener('click', () => {
       const now = Store.toggleSaved(job);
       App.toast(now ? 'Saved: ' + Util.truncate(job.title, 40) : 'Removed from saved');
@@ -1041,6 +1078,371 @@ const App = {
     });
 
     return card;
+  },
+
+  /* ================= Laya — decision board + dossiers ================= */
+
+  /** Ranked [{m, a}] rows for every currently filtered match. */
+  layaRows() {
+    return Laya.rank(App.filteredMatches(), Store.profile());
+  },
+
+  renderLaya() {
+    const wrap = el('laya-list');
+    if (!wrap) return;
+    const rows = App.layaRows();
+    el('count-laya').textContent = rows.length;
+
+    // engine mode line
+    const s = Store.settings();
+    const mode = el('laya-mode');
+    if (mode) {
+      if (LLM.hasKey(s)) {
+        mode.innerHTML = 'Realtime metrics ✓ · Laya AI armed on <b>' + Util.escapeHtml(LLM.cfg(s).provider) +
+          '</b> — “Run Laya AI” writes full dossiers (translation · readiness · cover note)';
+      } else {
+        mode.textContent = 'Realtime metrics, no AI key needed — add one in Setup for translated dossiers + cover notes';
+      }
+    }
+
+    // headline stats
+    const applyNow = rows.filter(r => r.a.priority >= 78).length;
+    const avgRead = rows.length ? Math.round(rows.reduce((x, r) => x + r.a.readiness.percent, 0) / rows.length) : 0;
+    const bestOdds = rows.length ? Math.max.apply(null, rows.map(r => r.a.odds)) : 0;
+    const topValue = rows.length ? Math.max.apply(null, rows.map(r => r.a.value)) : 0;
+    el('stat-laya-apply').textContent = applyNow;
+    el('stat-laya-readiness').textContent = avgRead + '%';
+    el('stat-laya-odds').textContent = bestOdds + '%';
+    el('stat-laya-value').textContent = topValue;
+
+    // ranking
+    const sorters = {
+      priority: (x, y) => y.a.priority - x.a.priority,
+      value:    (x, y) => y.a.value - x.a.value,
+      odds:     (x, y) => y.a.odds - x.a.odds,
+      match:    (x, y) => y.a.match.blended - x.a.match.blended,
+      fresh:    (x, y) => (x.a.daysOld == null ? 9e9 : x.a.daysOld) - (y.a.daysOld == null ? 9e9 : y.a.daysOld)
+    };
+    rows.sort(sorters[App.state.layaSort] || sorters.priority);
+
+    wrap.innerHTML = '';
+    if (!rows.length) {
+      wrap.innerHTML = '<div class="empty small"><div class="empty-art">🧠</div>' +
+        '<h3>Nothing to decide on yet</h3><p class="hint">Scan the boards or load Demo data — Laya will rank ' +
+        'every job by <b>priority = match × value × odds</b> and open a full dossier for each.</p></div>';
+      return;
+    }
+    for (let i = 0; i < Math.min(rows.length, 120); i++) {
+      wrap.appendChild(App.layaCard(rows[i], i + 1));
+    }
+  },
+
+  /** A metric bar: label + track + value. */
+  bar(label, v) {
+    const n = Math.max(0, Math.min(100, Math.round(Number(v) || 0)));
+    const cls = n >= 70 ? 'hi' : n >= 40 ? 'mid' : 'lo';
+    return '<div class="bar"><span class="bar-label">' + Util.escapeHtml(label) + '</span>' +
+      '<div class="bar-track"><i class="' + cls + '" style="width:' + n + '%"></i></div>' +
+      '<b>' + n + '</b></div>';
+  },
+
+  layaCard(r, rankNo) {
+    const m = r.m, a = r.a, job = m.job;
+    const card = document.createElement('div');
+    card.className = 'laya-card';
+
+    const srcName = job.source === 'gmail' ? 'Gmail' :
+      (JobSources.sources.find(x => x.id === job.source) || { name: job.source }).name;
+    const coInitial = (String(job.company || '?').trim()[0] || '?').toUpperCase();
+
+    const chips = [];
+    if (a.salaryText) chips.push('<span class="tag pay">💰 ' + Util.escapeHtml(a.salaryText) + '</span>');
+    chips.push('<span class="tag">' + Util.escapeHtml(a.levelUnknown ? 'level unstated' : Util.truncate(a.level, 12)) + '</span>');
+    if (job.remote) chips.push('<span class="tag remote">remote</span>');
+    if (job.location) chips.push('<span class="tag">' + Util.escapeHtml(Util.truncate(job.location, 26)) + '</span>');
+    chips.push('<span class="tag">' + Util.escapeHtml(a.freshLabel) + '</span>');
+    chips.push('<span class="tag">' + Util.escapeHtml(srcName) + '</span>');
+    const verdict = Store.layaVerdict(Util.dedupeKey(job.title, job.company));
+    if (verdict && verdict.fp === Laya.fingerprint(Store.profile())) {
+      chips.push('<span class="tag ai-tag">🧠 AI dossier</span>');
+    }
+
+    const titleHtml = job.url
+      ? '<a href="' + Util.escapeHtml(job.url) + '" target="_blank" rel="noopener">' + Util.escapeHtml(job.title) + '</a>'
+      : Util.escapeHtml(job.title);
+
+    card.innerHTML =
+      '<div class="laya-rankcol">' +
+        '<span class="laya-rank">#' + rankNo + '</span>' +
+        '<div class="ring prio" style="--p:' + a.priority + '" title="Laya priority score" ' +
+          'role="img" aria-label="Priority ' + a.priority + ' out of 100"><b>' + a.priority + '</b></div>' +
+      '</div>' +
+      '<div class="laya-main">' +
+        '<div class="job-top">' +
+          '<span class="co-avatar" aria-hidden="true">' + Util.escapeHtml(coInitial) + '</span>' +
+          '<div class="job-headline">' +
+            '<div class="job-title">' + titleHtml + '</div>' +
+            '<div class="job-company">' + Util.escapeHtml(job.company) + '</div>' +
+          '</div>' +
+          '<span class="decision ' + a.decision.cls + '">' + a.decision.icon + ' ' + a.decision.label + '</span>' +
+        '</div>' +
+        '<div class="meta-row">' + chips.join('') + '</div>' +
+        '<div class="laya-bars">' +
+          App.bar('Match', a.match.blended) + App.bar('Value', a.value) +
+          App.bar('Odds', a.odds) + App.bar('Readiness', a.readiness.percent) +
+        '</div>' +
+        '<div class="laya-why">' + Util.escapeHtml(Laya.explain(a)) + '</div>' +
+        '<div class="job-actions">' +
+          '<button class="btn small primary" data-act="dossier">Full dossier →</button>' +
+          (job.url ? '<a class="btn small ghost" href="' + Util.escapeHtml(job.url) + '" target="_blank" rel="noopener">Apply ↗</a>' : '') +
+          '<span class="spacer"></span>' +
+          '<button class="icon-btn" data-act="save-l">💾 save</button>' +
+        '</div>' +
+      '</div>';
+
+    card.querySelector('[data-act="dossier"]').addEventListener('click', () => App.openDossier(m));
+    card.querySelector('[data-act="save-l"]').addEventListener('click', () => {
+      const now = Store.toggleSaved(job);
+      App.toast(now ? 'Saved: ' + Util.truncate(job.title, 40) : 'Removed from saved');
+      App.updateCounts();
+      App.renderAll();
+    });
+    return card;
+  },
+
+  /* ---- dossier modal ---- */
+  openDossier(m) {
+    App.state.dossier = m;
+    App.renderDossier();
+    el('job-dossier').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+  },
+
+  closeDossier() {
+    el('job-dossier').classList.add('hidden');
+    App.state.dossier = null;
+    document.body.style.overflow = '';
+  },
+
+  renderDossier() {
+    const m = App.state.dossier;
+    if (!m) return;
+    const body = el('dossier-body');
+    const profile = Store.profile();
+    const job = m.job;
+    const a = Laya.analyze(m, profile);
+    const key = Util.dedupeKey(job.title, job.company);
+    const fp = Laya.fingerprint(profile);
+    const v = Store.layaVerdict(key);
+    const fresh = !!(v && v.fp === fp);
+    const lang = fresh ? (v.lang || 'en') : App.state.layaLang;
+
+    // AI enrichments win over the local ones when present
+    const readinessPct = (fresh && v.readiness_percent != null) ? v.readiness_percent : a.readiness.percent;
+    const strengths = (fresh && v.strengths && v.strengths.length) ? v.strengths : a.readiness.strengths;
+    const gaps = (fresh && v.gaps && v.gaps.length) ? v.gaps : a.readiness.gaps;
+    const actionMap = { apply: '🚀 Apply now', prepare: '🟡 Prepare, then apply', watch: '👀 Keep watching', skip: '💤 Skip' };
+
+    const srcName = job.source === 'gmail' ? 'Gmail lead' :
+      (JobSources.sources.find(x => x.id === job.source) || { name: job.source }).name;
+
+    const chips = [
+      '<span class="tag">' + Util.escapeHtml(srcName) + '</span>',
+      '<span class="tag">' + Util.escapeHtml(a.levelUnknown ? 'level unstated' : Util.truncate(a.level, 14) + ' level') + '</span>',
+      '<span class="tag">' + Util.escapeHtml(a.freshLabel) + '</span>'
+    ];
+    if (job.remote) chips.push('<span class="tag remote">remote</span>');
+    if (job.location) chips.push('<span class="tag">' + Util.escapeHtml(Util.truncate(job.location, 30)) + '</span>');
+    if (a.salaryText) chips.push('<span class="tag pay">💰 ' + Util.escapeHtml(a.salaryText) + '</span>');
+
+    // "what it really means" — AI translation when available, local facts otherwise
+    let means;
+    if (fresh && v.what_it_really_means) {
+      means = '<p class="dossier-meaning">' + Util.escapeHtml(v.what_it_really_means) + '</p>' +
+        '<small>' + (lang === 'hi' ? 'Laya AI · हिन्दी अनुवाद' : 'Laya AI translation') + '</small>';
+    } else {
+      means = '<ul class="dossier-facts">' +
+        Laya.plainSummary(job, profile, a).map(r =>
+          '<li><b>' + Util.escapeHtml(r.k) + ':</b> ' + Util.escapeHtml(r.v) + '</li>').join('') +
+        '</ul><small>Local translation — hit “Ask Laya” for the AI read (plain talk + Hindi option).</small>';
+    }
+
+    const reqRows = a.requirements.map(req => {
+      const hay = req.toLowerCase();
+      const hit = (profile.skills || []).some(s => Matcher.textHas(hay, String(s).toLowerCase()));
+      return '<li class="' + (hit ? 'ok' : 'gap') + '">' + (hit ? '✓' : '•') + ' ' + Util.escapeHtml(req) + '</li>';
+    }).join('');
+
+    body.innerHTML =
+      '<div class="dossier-head">' +
+        '<span class="co-avatar big" aria-hidden="true">' + Util.escapeHtml((String(job.company || '?').trim()[0] || '?').toUpperCase()) + '</span>' +
+        '<div class="job-headline">' +
+          '<div class="job-title">' + (job.url ? '<a href="' + Util.escapeHtml(job.url) + '" target="_blank" rel="noopener">' + Util.escapeHtml(job.title) + '</a>' : Util.escapeHtml(job.title)) + '</div>' +
+          '<div class="job-company">' + Util.escapeHtml(job.company) + '</div>' +
+        '</div>' +
+        '<span class="decision ' + a.decision.cls + '">' + a.decision.icon + ' ' + a.decision.label + '</span>' +
+      '</div>' +
+      '<div class="meta-row">' + chips.join('') + '</div>' +
+
+      '<div class="dossier-scores">' +
+        '<div class="score-plate big"><b>' + a.priority + '</b><span>priority</span></div>' +
+        '<div class="score-plate"><b>' + a.match.blended + '</b><span>match' + (a.match.aiScore != null ? '*' : '') + '</span></div>' +
+        '<div class="score-plate"><b>' + a.value + '</b><span>value</span></div>' +
+        '<div class="score-plate"><b>' + a.odds + '</b><span>odds</span></div>' +
+        '<div class="score-plate read"><b>' + readinessPct + '%</b><span>readiness</span></div>' +
+      '</div>' +
+
+      '<div class="dossier-bars">' +
+        App.bar('Skills', a.parts.odds.skills) + App.bar('Role fit', a.parts.odds.role) +
+        App.bar('Experience', a.parts.odds.exp) + App.bar('Location', a.parts.odds.loc) +
+        App.bar('Freshness', a.parts.odds.fresh) + App.bar('Level', a.levelFit) +
+        App.bar('Pay', a.parts.value.pay) + App.bar('Inbound intent', a.parts.odds.intent) +
+      '</div>' +
+      (a.match.aiScore != null ? '<small>* match blends your local ' + a.match.score + ' with the AI score ' + a.match.aiScore + '</small>' : '') +
+
+      '<section class="dossier-sec"><h3>💬 What this job really means' + (lang === 'hi' ? ' (हिन्दी)' : '') + '</h3>' + means + '</section>' +
+
+      '<section class="dossier-sec"><h3>🧭 Profile readiness — ' + readinessPct + '%</h3>' +
+        '<div class="readiness-cols">' +
+          '<div><h4>✓ You bring</h4><ul class="req-list">' +
+            strengths.map(x => '<li class="ok">✓ ' + Util.escapeHtml(x) + '</li>').join('') + '</ul></div>' +
+          '<div><h4>⚠ Gaps / risks</h4><ul class="req-list">' +
+            (gaps.length ? gaps.map(x => '<li class="gap">⚠ ' + Util.escapeHtml(x) + '</li>').join('')
+              : '<li class="ok">✓ No obvious gaps detected</li>') + '</ul></div>' +
+        '</div></section>' +
+
+      (a.requirements.length
+        ? '<section class="dossier-sec"><h3>📋 Their requirements vs your profile</h3><ul class="req-list">' + reqRows + '</ul></section>'
+        : '') +
+
+      (fresh && v.verdict
+        ? '<section class="dossier-sec verdict-box"><h3>🧠 Laya’s verdict</h3>' +
+          '<p class="verdict-text">' + Util.escapeHtml(v.verdict) + '</p>' +
+          (v.action ? '<span class="decision ' + (v.action === 'apply' ? 'good' : v.action === 'prepare' ? 'warn' : v.action === 'watch' ? 'info' : 'off') + '">' + actionMap[v.action] + '</span>' : '') +
+          (v.cover_note
+            ? '<h4>✍️ Ready-to-send cover note</h4><pre class="cover-note" id="dossier-cover-note">' + Util.escapeHtml(v.cover_note) + '</pre>' +
+              '<button class="btn small" data-dossier="copy-cover">📋 Copy cover note</button>'
+            : '') +
+          '</section>'
+        : '') +
+
+      '<div class="dossier-actions">' +
+        (job.url ? '<a class="btn primary" href="' + Util.escapeHtml(job.url) + '" target="_blank" rel="noopener">Apply now ↗</a>' : '<span class="hint">no apply link found</span>') +
+        '<button class="btn" data-dossier="ask">✨ ' + (fresh ? 'Re-ask Laya' : 'Ask Laya for full dossier') + '</button>' +
+        '<select data-dossier="lang" aria-label="Dossier language" title="Language for the Laya AI read">' +
+          '<option value="en"' + (lang === 'en' ? ' selected' : '') + '>English</option>' +
+          '<option value="hi"' + (lang === 'hi' ? ' selected' : '') + '>हिन्दी</option>' +
+        '</select>' +
+        '<button class="btn ghost" data-dossier="save">💾 ' + (Store.isSaved(job.id) ? 'saved' : 'save') + '</button>' +
+      '</div>' +
+
+      (job.description
+        ? '<details class="dossier-raw"><summary>📄 Original posting</summary><pre>' +
+          Util.escapeHtml(Util.truncate(Util.stripHtml(job.description), 3500)) + '</pre></details>'
+        : '');
+
+    // dynamic bindings
+    const askBtn = body.querySelector('[data-dossier="ask"]');
+    askBtn.addEventListener('click', () => App.askLaya(m, lang, askBtn));
+
+    const langSel = body.querySelector('[data-dossier="lang"]');
+    langSel.addEventListener('change', () => {
+      App.state.layaLang = langSel.value;
+      const cached = Store.layaVerdict(key);
+      if (cached && cached.fp === fp && cached.lang === langSel.value) App.renderDossier();
+      else App.askLaya(m, langSel.value, body.querySelector('[data-dossier="ask"]'));
+    });
+
+    const saveBtn = body.querySelector('[data-dossier="save"]');
+    saveBtn.addEventListener('click', () => {
+      const now = Store.toggleSaved(job);
+      saveBtn.textContent = now ? '💾 saved' : '💾 save';
+      App.toast(now ? 'Saved: ' + Util.truncate(job.title, 40) : 'Removed from saved');
+      App.updateCounts();
+      App.renderAll();
+    });
+
+    const copyBtn = body.querySelector('[data-dossier="copy-cover"]');
+    if (copyBtn) copyBtn.addEventListener('click', () => {
+      const note = el('dossier-cover-note');
+      App.copyText(note ? note.textContent : (v.cover_note || ''), 'Cover note copied — paste it into the application');
+    });
+  },
+
+  /** One Laya AI call for a single job (fetch → parse → cache). */
+  async _layaOne(m, lang) {
+    const profile = Store.profile();
+    const a = Laya.analyze(m, profile);
+    const p = Laya.buildPrompt(m.job, profile, a, lang);
+    const raw = await LLM.chat([
+      { role: 'system', content: p.sys },
+      { role: 'user', content: p.user }
+    ], Store.settings(), { temperature: 0.3 });
+    const verdict = Laya.parseAIJson(raw);
+    Store.saveLayaVerdict(Util.dedupeKey(m.job.title, m.job.company),
+      Object.assign({ fp: Laya.fingerprint(profile), lang, ts: Date.now() }, verdict));
+    return verdict;
+  },
+
+  /** Per-job button inside the dossier. */
+  async askLaya(m, lang, btnEl) {
+    const s = Store.settings();
+    if (!LLM.hasKey(s)) {
+      App.toast('Add an AI key in Setup → AI re-ranking to unlock full dossiers', true);
+      App.openDrawer(true);
+      return;
+    }
+    const key = Util.dedupeKey(m.job.title, m.job.company);
+    const cached = Store.layaVerdict(key);
+    if (cached && cached.fp === Laya.fingerprint(Store.profile()) && cached.lang === lang) {
+      App.renderDossier();
+      return;
+    }
+    if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<span class="spin">◌</span> Laya is reading…'; }
+    try {
+      await App._layaOne(m, lang);
+      App.toast('✓ Laya finished the dossier');
+      App.renderLaya();
+      App.renderDossier();
+    } catch (e) {
+      App.toast('Laya AI: ' + e.message, true);
+      App.log('✖ Laya AI: ' + e.message, true);
+      if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '✨ Ask Laya'; }
+    }
+  },
+
+  /** Batch: dossier the top 10 ranked jobs. */
+  async runLayaAI() {
+    const s = Store.settings();
+    if (!LLM.hasKey(s)) {
+      App.toast('Add an AI key first (Setup → AI re-ranking)', true);
+      App.openDrawer(true);
+      return;
+    }
+    const btn = el('btn-laya-ai');
+    const fp = Laya.fingerprint(Store.profile());
+    const lang = App.state.layaLang;
+    const pending = App.layaRows().slice(0, 10).filter(r => {
+      const v = Store.layaVerdict(Util.dedupeKey(r.m.job.title, r.m.job.company));
+      return !(v && v.fp === fp && v.lang === lang);
+    });
+    if (!pending.length) {
+      App.toast('Laya AI has already dossiered the top 10 — open any card for the full read');
+      return;
+    }
+    btn.disabled = true;
+    let done = 0, failed = 0;
+    for (const r of pending) {
+      btn.innerHTML = '<span class="spin">◌</span> Laya reading ' + (done + failed + 1) + '/' + pending.length + '…';
+      try { await App._layaOne(r.m, lang); done++; }
+      catch (e) { failed++; App.log('✖ Laya AI (' + Util.truncate(r.m.job.title, 40) + '): ' + e.message, true); }
+    }
+    btn.disabled = false;
+    btn.innerHTML = '✨ Run Laya AI — top 10';
+    App.renderLaya();
+    if (App.state.dossier) App.renderDossier();
+    App.toast('Laya AI finished — ' + done + ' full dossiers written' + (failed ? ', ' + failed + ' failed' : ''));
+    App.log('✔ Laya AI: ' + done + ' dossiers' + (failed ? ', ' + failed + ' failed' : ''));
   },
 
   updateCounts() {

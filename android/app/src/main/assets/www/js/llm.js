@@ -4,23 +4,68 @@
 
 const LLM = {
 
+  /** True when the active provider has a base URL + key configured. */
+  hasKey(settings) {
+    const cfg = LLM.cfg(settings);
+    return !!(cfg && cfg.base && cfg.key);
+  },
+
+  /** Resolved provider config {provider, base, key, model} or null. */
+  cfg(settings) {
+    const provider = (settings && settings.aiProvider) || 'groq';
+    const cfg = settings && settings.aiConfigs ? settings.aiConfigs[provider] : null;
+    if (!cfg) return null;
+    return {
+      provider,
+      base: String(cfg.base || '').replace(/\/+$/, ''),
+      key: cfg.key || '',
+      model: cfg.model || ''
+    };
+  },
+
+  /** Generic OpenAI-compatible chat call. Resolves to the message content string. */
+  async chat(messages, settings, opts) {
+    const cfg = LLM.cfg(settings);
+    if (!cfg) throw new Error('AI provider configuration missing');
+    if (!cfg.base) throw new Error('Set the API base URL (e.g. https://api.groq.com/openai/v1)');
+    if (!cfg.key) throw new Error('Add your API key first');
+
+    const body = {
+      model: cfg.model,
+      temperature: (opts && opts.temperature) != null ? opts.temperature : 0.2,
+      messages
+    };
+
+    let res;
+    try {
+      res = await fetch(cfg.base + '/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + cfg.key
+        },
+        body: JSON.stringify(body)
+      });
+    } catch (e) {
+      throw new Error('Network error reaching ' + cfg.base + ' — check the URL / CORS / key');
+    }
+
+    if (!res.ok) {
+      let detail = '';
+      try { const err = await res.json(); detail = err.error && err.error.message ? ' — ' + err.error.message : ''; } catch (e) {}
+      throw new Error('API error ' + res.status + detail);
+    }
+
+    const data = await res.json();
+    return (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+  },
+
   /**
    * profile: user profile; jobs: already locally-scored matches (top N);
    * settings: full Store.settings() object including aiProvider and aiConfigs
    * Returns [{id, score, reason}] or throws with a friendly message.
    */
   async rerank(profile, jobs, settings) {
-    const provider = settings.aiProvider || 'groq';
-    const cfg = settings.aiConfigs ? settings.aiConfigs[provider] : null;
-    if (!cfg) throw new Error('AI provider configuration missing');
-    
-    const apiBase = String(cfg.base || '').replace(/\/+$/, '');
-    const apiKey = cfg.key;
-    const model = cfg.model;
-    
-    if (!apiBase) throw new Error('Set the API base URL (e.g. https://api.groq.com/openai/v1)');
-    if (!apiKey) throw new Error('Add your API key first');
-
     const profileSummary =
       (profile.aiContext || PORTFOLIO_PROFILE.aiContext || '') + '\n' +
       'Skills: ' + (profile.skills || []).join(', ') + '. ' +
@@ -46,35 +91,11 @@ const LLM = {
       'mentioning the single strongest fit or the main gap. ' +
       'Respond with ONLY valid JSON, no markdown: {"results":[{"n":0,"score":85,"reason":"..."}]}';
 
-    let res;
-    try {
-      res = await fetch(apiBase + '/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + apiKey
-        },
-        body: JSON.stringify({
-          model,
-          temperature: 0.2,
-          messages: [
-            { role: 'system', content: 'You are a precise job matching assistant. Respond with valid JSON only.' },
-            { role: 'user', content: prompt }
-          ]
-        })
-      });
-    } catch (e) {
-      throw new Error('Network error reaching ' + apiBase + ' — check the URL / CORS / key');
-    }
+    const content = await LLM.chat([
+      { role: 'system', content: 'You are a precise job matching assistant. Respond with valid JSON only.' },
+      { role: 'user', content: prompt }
+    ], settings);
 
-    if (!res.ok) {
-      let detail = '';
-      try { const err = await res.json(); detail = err.error && err.error.message ? ' — ' + err.error.message : ''; } catch (e) {}
-      throw new Error('API error ' + res.status + detail);
-    }
-
-    const data = await res.json();
-    const content = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
     const start = content.indexOf('{');
     const end = content.lastIndexOf('}');
     if (start < 0 || end <= start) throw new Error('AI returned no parsable JSON');

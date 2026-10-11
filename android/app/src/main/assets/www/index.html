@@ -220,6 +220,7 @@
 
     <nav class="tabs" aria-label="Job lists">
       <button class="tab active" data-tab="matches">🎯 Matches <span id="count-matches" class="count">0</span></button>
+      <button class="tab" data-tab="laya">🧠 Laya <span id="count-laya" class="count">0</span></button>
       <button class="tab" data-tab="saved">💾 Saved <span id="count-saved" class="count">0</span></button>
     </nav>
 
@@ -290,6 +291,55 @@
     <div id="matches" class="grid"></div>
     <div id="saved" class="grid hidden"></div>
 
+    <!-- ============ LAYA — decision board ============ -->
+    <section id="laya" class="hidden" aria-label="Laya decision board">
+      <div class="laya-head">
+        <div class="laya-id">
+          <span class="laya-avatar" aria-hidden="true">🧠</span>
+          <div>
+            <h2>Laya — your decision maker</h2>
+            <small id="laya-mode">Reading the board…</small>
+          </div>
+        </div>
+        <div class="laya-head-actions">
+          <select id="laya-sort" aria-label="Rank decisions by">
+            <option value="priority">Rank: priority</option>
+            <option value="value">Rank: value</option>
+            <option value="odds">Rank: odds</option>
+            <option value="match">Rank: match</option>
+            <option value="fresh">Rank: freshest</option>
+          </select>
+          <button id="btn-laya-ai" class="btn small primary" title="Ask Laya AI to write full dossiers (translation, readiness, cover note) for the top 10">✨ Run Laya AI — top 10</button>
+        </div>
+      </div>
+
+      <div class="stats" id="laya-stats">
+        <div class="stat good" title="Jobs scoring “Apply now” (priority ≥ 78)">
+          <span class="stat-icon">🚀</span>
+          <div><div class="stat-num" id="stat-laya-apply">0</div><div class="stat-label">apply now</div></div>
+        </div>
+        <div class="stat" title="Average profile readiness across shown jobs">
+          <span class="stat-icon">🧭</span>
+          <div><div class="stat-num" id="stat-laya-readiness">0%</div><div class="stat-label">avg readiness</div></div>
+        </div>
+        <div class="stat" title="Best interview odds on the board">
+          <span class="stat-icon">🎲</span>
+          <div><div class="stat-num" id="stat-laya-odds">0%</div><div class="stat-label">best odds</div></div>
+        </div>
+        <div class="stat" title="Highest-value opportunity (pay, level, company)">
+          <span class="stat-icon">💎</span>
+          <div><div class="stat-num" id="stat-laya-value">0</div><div class="stat-label">top value</div></div>
+        </div>
+      </div>
+
+      <p class="hint laya-legend">
+        <b>Priority</b> = 42% match + 24% value + 34% odds · <b>value</b> = pay, seniority, company, perks ·
+        <b>odds</b> = skill coverage, experience bar, freshness, inbound intent. Recomputed live on every filter change.
+      </p>
+
+      <div id="laya-list" class="laya-list"></div>
+    </section>
+
     <div class="show-more-wrap">
       <button id="btn-show-more" class="btn ghost hidden">Show more matches ↓</button>
     </div>
@@ -300,6 +350,7 @@
 
 <nav class="bottom-nav" aria-label="Primary">
   <button class="bn-btn active" id="bn-matches"><span class="bn-ico">🎯</span>Matches</button>
+  <button class="bn-btn" id="bn-laya"><span class="bn-ico">🧠</span>Laya</button>
   <button class="bn-btn" id="bn-saved"><span class="bn-ico">💾</span>Saved</button>
   <button class="bn-btn" id="bn-setup"><span class="bn-ico">⚙️</span>Setup</button>
 </nav>
@@ -347,6 +398,17 @@
   </div>
 </div>
 
+<!-- Job dossier — Laya's full read on one job -->
+<div id="job-dossier" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="dossier-title">
+  <div class="modal wide">
+    <div class="modal-head">
+      <h2 id="dossier-title">🧠 Job dossier</h2>
+      <button id="dossier-close" class="icon-btn" aria-label="Close dossier">✕</button>
+    </div>
+    <div id="dossier-body" class="dossier-body"><!-- rendered by app.js --></div>
+  </div>
+</div>
+
 <div id="gate-root"></div>
 
 <div id="toast" class="toast info"></div>
@@ -359,6 +421,7 @@
 <script src="js/gmail.js"></script>
 <script src="js/githubauth.js"></script>
 <script src="js/matcher.js"></script>
+<script src="js/laya.js"></script>
 <script src="js/llm.js"></script>
 <script src="js/app.js"></script>
 </body>

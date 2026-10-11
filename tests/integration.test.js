@@ -281,7 +281,7 @@ if (!ONLINE) {
 /* ================= F. ANDROID ASSETS SYNC ================= */
 section('F. Android APK assets in sync with web app');
 const www = path.join(ROOT, 'android', 'app', 'src', 'main', 'assets', 'www');
-const assetsToCheck = ['index.html', 'css/styles.css', 'js/app.js', 'js/demo.js', 'js/gmail.js', 'js/jobs.js', 'js/llm.js', 'js/matcher.js', 'js/portfolio.js', 'js/storage.js', 'js/util.js'];
+const assetsToCheck = ['index.html', 'css/styles.css', 'js/app.js', 'js/demo.js', 'js/gmail.js', 'js/jobs.js', 'js/laya.js', 'js/llm.js', 'js/matcher.js', 'js/portfolio.js', 'js/storage.js', 'js/util.js'];
 for (const a of assetsToCheck) {
   const web = fs.readFileSync(path.join(ROOT, a), 'utf8');
   let and = '';
