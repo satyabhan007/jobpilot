@@ -1,0 +1,23 @@
+# Android build artifacts
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+
+# Node
+node_modules/
+
+# Built GitHub Pages output
+dist/
+
+# Credentials & secrets — never commit
+.env
+.env.*
+*.pem
+*.key
+*.jks
+*.keystore
+*token*
+*credentials*
+secrets.*
+!.github/workflows/*

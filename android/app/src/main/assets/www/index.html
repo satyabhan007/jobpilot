@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0e16">
+  <meta name="description" content="JobPilot — local AI job agent. Scans Gmail and worldwide remote job boards, scores everything against your profile.">
+  <title>JobPilot — Satyabhan's local AI job agent</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9B%B0%EF%B8%8F%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <button id="btn-menu" class="icon-round" aria-label="Open settings menu" title="Settings">☰</button>
+    <span class="logo">🛰️</span>
+    <div>
+      <h1>JobPilot</h1>
+      <span class="tagline">Satyabhan's local AI job agent — runs entirely in this browser</span>
+    </div>
+  </div>
+  <div class="top-actions">
+    <span id="gmail-chip" class="chip" title="Gmail connection status">⚫ Gmail: not connected</span>
+    <span id="boards-chip" class="chip" title="Job board status">⚫ Boards: idle</span>
+    <button id="btn-scan-all" class="btn primary">⚡ Scan everything</button>
+    <button id="btn-demo" class="btn ghost" title="Load sample data to explore the UI">Demo data</button>
+    <button id="btn-theme" class="icon-round" aria-label="Toggle light or dark theme" title="Toggle theme">🌙</button>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- ============ SIDEBAR (drawer on mobile) ============ -->
+  <aside class="sidebar" id="sidebar" aria-label="Settings and connections">
+    <div class="drawer-head">
+      <h3>⚙️ Setup & connections</h3>
+      <button id="btn-drawer-close" class="icon-round" aria-label="Close settings">✕</button>
+    </div>
+
+    <!-- Profile -->
+    <section class="card collapsible" id="profile-card">
+      <div class="card-head" role="button" tabindex="0" aria-expanded="true">
+        <h2>👤 Your profile</h2>
+        <span class="hint" id="profile-hint">used to score every job</span>
+        <button class="card-toggle" aria-label="Collapse profile section">▾</button>
+      </div>
+
+      <!-- summary pulled from satyabhan007.github.io (js/portfolio.js) -->
+      <div class="profile-summary" id="profile-summary">
+        <div class="ps-top">
+          <span class="ps-avatar" id="ps-avatar">SB</span>
+          <div class="ps-id">
+            <b id="ps-name">—</b>
+            <small id="ps-headline">—</small>
+          </div>
+          <span class="ps-open">OPEN TO WORK</span>
+        </div>
+        <div class="ps-chips" id="ps-chips"></div>
+        <p class="ps-summary" id="ps-summary"></p>
+        <div class="ps-links" id="ps-links"></div>
+      </div>
+
+      <div class="field">
+        <label for="p-name">Name</label>
+        <input id="p-name" type="text" placeholder="Satyabhan">
+      </div>
+      <div class="field">
+        <label for="p-years">Years of experience</label>
+        <input id="p-years" type="number" min="0" max="50" placeholder="e.g. 8">
+      </div>
+      <div class="field">
+        <label for="p-skills">Skills <small>(comma separated)</small></label>
+        <textarea id="p-skills" rows="3" placeholder="python, langchain, rag, genai, vertex ai, docker…"></textarea>
+      </div>
+      <div class="field">
+        <label for="p-roles">Roles you want <small>(comma separated)</small></label>
+        <input id="p-roles" type="text" placeholder="ai engineer, genai engineer, mlops engineer">
+      </div>
+      <div class="field">
+        <label for="p-locations">Preferred locations <small>(comma separated)</small></label>
+        <input id="p-locations" type="text" placeholder="pune, india, remote">
+      </div>
+      <div class="field row">
+        <label class="check">
+          <input id="p-remote" type="checkbox" checked>
+          <span>Open to remote</span>
+        </label>
+      </div>
+      <div class="btn-row">
+        <button id="btn-profile-reset" class="btn ghost small" title="Restore the profile from satyabhan007.github.io">↺ Reset to my portfolio profile</button>
+      </div>
+    </section>
+
+    <!-- Gmail — multi-account -->
+    <section class="card collapsible" id="gmail-card">
+      <div class="card-head" role="button" tabindex="0" aria-expanded="true">
+        <h2>📧 Gmail</h2>
+        <span id="gmail-status" class="status off">not connected</span>
+        <button class="card-toggle" aria-label="Collapse Gmail section">▾</button>
+      </div>
+
+      <!-- Client ID row — hidden when pre-configured from portfolio.js -->
+      <div id="gmail-clientid-row" class="field">
+        <label for="g-client-id">
+          Google OAuth Client ID
+          <small id="gmail-clientid-source"></small>
+        </label>
+        <input id="g-client-id" type="text" placeholder="xxxxxxxx.apps.googleusercontent.com">
+        <p class="hint" id="gmail-clientid-hint">
+          Free from <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a>.
+          See README — ~5 min, one time only. Or set <code>gmailClientId</code> in
+          <code>js/portfolio.js</code> to never enter it again.
+        </p>
+      </div>
+
+      <!-- One-click Google sign-in -->
+      <button id="btn-google-signin" class="btn-google" type="button">
+        <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true">
+          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+        </svg>
+        <span>Sign in with Google</span>
+      </button>
+      <p class="hint" id="gmail-signin-hint">One click · pick an account · done. Works with multiple accounts — just sign in again for each.</p>
+
+      <!-- Connected accounts list -->
+      <div id="gmail-accounts-list" class="gmail-accounts-list"></div>
+
+      <div class="btn-row">
+        <button id="btn-gmail-add" class="btn primary small">＋ Add another account</button>
+        <button id="btn-gmail-scan" class="btn small" disabled>📥 Scan all inboxes</button>
+      </div>
+      <div class="btn-row">
+        <button id="btn-gmail-login-link" class="btn ghost small" type="button">🔗 Copy login link</button>
+        <button id="btn-gmail-setup" class="btn ghost small" type="button">🛠 Setup wizard</button>
+      </div>
+      <div class="field">
+        <label for="g-days">Look back <small>(days)</small></label>
+        <input id="g-days" type="number" min="1" max="180" value="45">
+      </div>
+      <p class="hint">Read-only scope · emails never leave this page except to Google's own API.<br>
+        <em>Tokens expire ~1h. Use Re-auth to reconnect without the picker.</em></p>
+    </section>
+
+    <!-- Job boards -->
+    <section class="card collapsible" id="boards-card">
+      <div class="card-head" role="button" tabindex="0" aria-expanded="true">
+        <h2>🌐 Job boards</h2>
+        <span class="hint">free public APIs — no keys</span>
+        <button class="card-toggle" aria-label="Collapse job boards section">▾</button>
+      </div>
+      <div id="board-rows"></div>
+      <div class="btn-row">
+        <button id="btn-boards-scan" class="btn primary small">🌐 Fetch boards</button>
+      </div>
+    </section>
+
+    <!-- AI rerank -->
+    <section class="card collapsible" id="ai-card">
+      <div class="card-head" role="button" tabindex="0" aria-expanded="true">
+        <h2>🤖 AI re-ranking <small>(optional)</small></h2>
+        <button class="card-toggle" aria-label="Collapse AI section">▾</button>
+      </div>
+      <p class="hint">Plug API keys for OpenRouter, Groq, NVIDIA, or any OpenAI-compatible API. Keys stay in localStorage.</p>
+
+      <div class="field">
+        <label for="ai-provider">Provider</label>
+        <select id="ai-provider">
+          <option value="groq">Groq</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="nvidia">NVIDIA (nim)</option>
+          <option value="deepseek">DeepSeek</option>
+          <option value="custom">Custom (OpenAI-compatible)</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="ai-base">API base URL</label>
+        <input id="ai-base" type="text" placeholder="https://api.groq.com/openai/v1">
+      </div>
+      <div class="field">
+        <label for="ai-model">Model</label>
+        <input id="ai-model" type="text" placeholder="llama3-8b-8192">
+      </div>
+      <div class="field">
+        <label for="ai-key">API key</label>
+        <input id="ai-key" type="password" placeholder="sk-…">
+      </div>
+      <div class="btn-row">
+        <button id="btn-ai-rerank" class="btn small">✨ Re-rank top matches</button>
+      </div>
+    </section>
+
+    <!-- Private access gate -->
+    <section class="card collapsible" id="gate-card">
+      <div class="card-head" role="button" tabindex="0" aria-expanded="true">
+        <h2>🔒 Private access</h2>
+        <span id="gate-badge" class="status off">n/a</span>
+        <button class="card-toggle" aria-label="Collapse private access section">▾</button>
+      </div>
+      <p class="hint">When hosted (GitHub Pages), a lock screen only admits
+        <b>@<span id="gate-owner-name">…</span></b>. Verified through GitHub's API; the
+        session token stays in this browser.</p>
+      <div id="gate-identity" class="gate-identity">—not verified—</div>
+      <div class="btn-row">
+        <button id="btn-gate-lock" class="btn ghost small" type="button">🔒 Lock now</button>
+        <button id="btn-gate-recheck" class="btn ghost small" type="button">↻ Re-verify session</button>
+      </div>
+    </section>
+
+    <p class="hint sidebar-foot">Data is stored only in this browser (localStorage). Nothing is uploaded anywhere.</p>
+  </aside>
+  <div id="drawer-overlay" aria-hidden="true"></div>
+
+  <!-- ============ CONTENT ============ -->
+  <section class="content">
+
+    <nav class="tabs" aria-label="Job lists">
+      <button class="tab active" data-tab="matches">🎯 Matches <span id="count-matches" class="count">0</span></button>
+      <button class="tab" data-tab="saved">💾 Saved <span id="count-saved" class="count">0</span></button>
+    </nav>
+
+    <!-- live dashboard -->
+    <div class="stats" id="stats-bar">
+      <div class="stat" title="Unique jobs gathered from all sources">
+        <span class="stat-icon">🛰️</span>
+        <div><div class="stat-num" id="stat-total">0</div><div class="stat-label">jobs found</div></div>
+      </div>
+      <div class="stat strong" title="Jobs scoring 70 or above for your profile">
+        <span class="stat-icon">🎯</span>
+        <div><div class="stat-num" id="stat-strong">0</div><div class="stat-label">strong matches</div></div>
+      </div>
+      <div class="stat" title="Jobs you saved">
+        <span class="stat-icon">💾</span>
+        <div><div class="stat-num" id="stat-saved">0</div><div class="stat-label">saved</div></div>
+      </div>
+      <div class="stat" title="Sources that responded successfully">
+        <span class="stat-icon">📡</span>
+        <div><div class="stat-num" id="stat-sources">0/6</div><div class="stat-label">sources live</div></div>
+      </div>
+    </div>
+
+    <div class="filter-bar" id="filter-bar">
+      <input id="f-text" type="search" placeholder="🔎 filter by keyword, company…  (press / to focus)">
+      <label class="range">min score
+        <input id="f-minscore" type="range" min="0" max="90" step="5" value="0">
+        <b id="f-minscore-val">0</b>
+      </label>
+      <select id="f-source">
+        <option value="all">All sources</option>
+        <option value="gmail">📧 Gmail leads</option>
+        <optgroup label="── Remote Worldwide ──">
+          <option value="remotive">Remotive</option>
+          <option value="remoteok">RemoteOK</option>
+          <option value="jobicy">Jobicy</option>
+          <option value="himalayas">Himalayas</option>
+        </optgroup>
+        <optgroup label="── General ──">
+          <option value="arbeitnow">Arbeitnow</option>
+          <option value="hn">Hacker News</option>
+        </optgroup>
+      </select>
+      <label class="check"><input id="f-remote" type="checkbox"><span>remote only</span></label>
+      <label class="check"><input id="f-ai" type="checkbox"><span>🤖 AI/ML only</span></label>
+      <select id="f-sort">
+        <option value="score">Sort: match score</option>
+        <option value="new">Sort: newest</option>
+      </select>
+    </div>
+
+    <div id="empty-state" class="empty">
+      <div class="empty-art">🛰️</div>
+      <h3>No matches yet</h3>
+      <ol>
+        <li>Your AI/ML profile is pre-loaded from <b>satyabhan007.github.io</b> — edit any field to tune matching</li>
+        <li>Hit <b>⚡ Scan everything</b> — pulls from <b>6 worldwide sources</b> (Remotive, RemoteOK, Jobicy, Himalayas, Arbeitnow, HN)</li>
+        <li>Use <b>🤖 AI/ML only</b> filter to focus on AI/GenAI/LLM/MLOps roles — or try <b>Demo data</b> first</li>
+        <li>Connect <b>Gmail</b> to catch recruiter outreach from multiple inboxes</li>
+      </ol>
+      <div class="empty-actions">
+        <button class="btn primary" data-empty-act="scan">⚡ Scan everything</button>
+        <button class="btn ghost" data-empty-act="demo">🧪 Load demo data</button>
+      </div>
+    </div>
+
+    <div id="skeletons" class="grid hidden" aria-hidden="true"></div>
+    <div id="matches" class="grid"></div>
+    <div id="saved" class="grid hidden"></div>
+
+    <div class="show-more-wrap">
+      <button id="btn-show-more" class="btn ghost hidden">Show more matches ↓</button>
+    </div>
+
+    <div id="scan-log" class="scan-log hidden"></div>
+  </section>
+</main>
+
+<nav class="bottom-nav" aria-label="Primary">
+  <button class="bn-btn active" id="bn-matches"><span class="bn-ico">🎯</span>Matches</button>
+  <button class="bn-btn" id="bn-saved"><span class="bn-ico">💾</span>Saved</button>
+  <button class="bn-btn" id="bn-setup"><span class="bn-ico">⚙️</span>Setup</button>
+</nav>
+
+<!-- OAuth setup wizard — zero-config guided connection -->
+<div id="oauth-wizard" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="wiz-title">
+  <div class="modal">
+    <div class="modal-head">
+      <h2 id="wiz-title">🔐 Connect Gmail — one-time setup</h2>
+      <button id="wiz-close" class="icon-btn" aria-label="Close setup">✕</button>
+    </div>
+    <ol class="wiz-steps">
+      <li>
+        <span class="wiz-step-title">Enable the Gmail API</span>
+        <a class="btn ghost small" href="https://console.cloud.google.com/apis/library/gmail.googleapis.com" target="_blank" rel="noopener">Open API Library ↗</a>
+      </li>
+      <li>
+        <span class="wiz-step-title">OAuth consent screen → <b>External</b> → add your Gmail as Test user</span>
+        <a class="btn ghost small" href="https://console.cloud.google.com/apis/credentials/consent" target="_blank" rel="noopener">Open Consent screen ↗</a>
+      </li>
+      <li>
+        <span class="wiz-step-title">Create an <b>OAuth Client ID</b> (Web application) — paste these two values exactly:</span>
+        <div class="wiz-copy-row">
+          <code id="wiz-origin">…</code>
+          <button class="btn small" id="wiz-copy-origin" type="button">Copy</button>
+        </div>
+        <div class="wiz-copy-row">
+          <code id="wiz-redirect">…</code>
+          <button class="btn small" id="wiz-copy-redirect" type="button">Copy</button>
+        </div>
+        <a class="btn ghost small" href="https://console.cloud.google.com/apis/credentials/oauthclient" target="_blank" rel="noopener">Create Client ID ↗</a>
+      </li>
+    </ol>
+    <div class="field">
+      <label for="wiz-client-id">Paste your Client ID</label>
+      <input id="wiz-client-id" type="text" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="btn-row">
+      <button id="wiz-connect" class="btn primary" type="button">Save & Connect</button>
+      <button id="wiz-copy-login-link" class="btn ghost" type="button">🔗 Copy login link</button>
+    </div>
+    <p class="hint">The Client ID is <b>not secret</b> — only Google's client_secret is, and sign-in never uses it.
+      The <b>login link</b> opens Google's consent page in this tab and returns here automatically —
+      use it when popups are blocked, or paste it into your phone's browser.</p>
+  </div>
+</div>
+
+<div id="gate-root"></div>
+
+<div id="toast" class="toast info"></div>
+
+<script src="js/util.js"></script>
+<script src="js/portfolio.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/demo.js"></script>
+<script src="js/jobs.js"></script>
+<script src="js/gmail.js"></script>
+<script src="js/githubauth.js"></script>
+<script src="js/matcher.js"></script>
+<script src="js/llm.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
